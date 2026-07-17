@@ -49,13 +49,34 @@ export async function POST(request: Request) {
       { message: 'RSVP belum dapat disimpan.' },
       { status: 500 },
     );
-  await supabase.from('guest_messages').insert({
-    wedding_id: parsed.data.weddingId,
-    guest_id: parsed.data.guestId || null,
-    guest_name: cleanName,
-    message: cleanMessage,
-    attendance_status: parsed.data.attendanceStatus,
-    is_approved: true,
-  });
-  return NextResponse.json({ ok: true, mode: 'supabase' });
+if (cleanMessage.trim()) {
+  const { error: messageError } = await supabase
+    .from('guest_messages')
+    .insert({
+      wedding_id: parsed.data.weddingId,
+      guest_id: parsed.data.guestId || null,
+      guest_name: cleanName,
+      message: cleanMessage.trim(),
+      attendance_status: parsed.data.attendanceStatus,
+      is_approved: true,
+    });
+
+  if (messageError) {
+    console.error('Gagal menyimpan buku tamu:', {
+      code: messageError.code,
+      message: messageError.message,
+      details: messageError.details,
+      hint: messageError.hint,
+    });
+
+    return NextResponse.json(
+      {
+        message: `RSVP tersimpan, tetapi ucapan gagal disimpan: ${messageError.message}`,
+      },
+      { status: 500 },
+    );
+  }
+}
+
+return NextResponse.json({ ok: true, mode: 'supabase' });
 }
