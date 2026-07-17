@@ -319,5 +319,24 @@ export async function saveWeddingSnapshot(
     { onConflict: 'wedding_id,setting_key' },
   );
   if (settingError) throw settingError;
+  if (content.messages.length > 0) {
+  const messageRows = content.messages.map((message) => ({
+    id: message.id,
+    wedding_id: content.id,
+    guest_name: message.guestName,
+    message: message.message,
+    attendance_status: message.attendanceStatus || null,
+    is_approved: message.approved,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { error: messagesError } = await supabase
+    .from('guest_messages')
+    .upsert(messageRows, { onConflict: 'id' });
+
+  if (messagesError) {
+    throw messagesError;
+  }
+}
   return { mode: 'supabase' };
 }
