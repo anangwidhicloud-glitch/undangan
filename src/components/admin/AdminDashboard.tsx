@@ -1849,48 +1849,99 @@ function GuestsTab({
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('semua');
   const [appOrigin, setAppOrigin] = useState('');
+  const [page, setPage] = useState(1);
+  const [addingGuest, setAddingGuest] = useState(false);
+  const [deletingGuestId, setDeletingGuestId] = useState<string | null>(null);
+  const addLockRef = useRef(false);
+  const itemsPerPage = 25;
 
   useEffect(() => {
     setAppOrigin(window.location.origin);
   }, []);
 
-  const filtered = content.guests.filter(
-    (g) =>
-      `${g.name} ${g.phone} ${g.group}`
-        .toLowerCase()
-        .includes(query.toLowerCase()) &&
-      (filter === 'semua' || g.rsvpStatus === filter),
+  const filtered = useMemo(
+    () =>
+      content.guests.filter(
+        (guest) =>
+          `${guest.name} ${guest.phone} ${guest.group}`
+            .toLowerCase()
+            .includes(query.toLowerCase()) &&
+          (filter === 'semua' || guest.rsvpStatus === filter),
+      ),
+    [content.guests, filter, query],
   );
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
+  const paginatedGuests = filtered.slice(
+    (page - 1) * itemsPerPage,
+    page * itemsPerPage,
+  );
+  const firstItem = filtered.length ? (page - 1) * itemsPerPage + 1 : 0;
+  const lastItem = Math.min(page * itemsPerPage, filtered.length);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, filter]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   function add() {
-    const name = `Tamu Baru ${content.guests.length + 1}`;
-    update({
-      guests: [
-        ...content.guests,
-        {
-          id: crypto.randomUUID(),
-          name,
-          greeting: 'Bapak/Ibu/Saudara/i',
-          phone: '',
-          group: 'Umum',
-          invitationQuota: 1,
-          slug: createGuestSlug(name, String(content.guests.length + 1)),
-          token: crypto.randomUUID(),
-          invitationStatus: 'belum_dikirim',
-          rsvpStatus: 'belum',
-        },
-      ],
-    });
+    if (addLockRef.current) return;
+    addLockRef.current = true;
+    setAddingGuest(true);
+
+    const nextNumber = content.guests.length + 1;
+    const name = `Tamu Baru ${nextNumber}`;
+    const nextGuests: GuestRecord[] = [
+      ...content.guests,
+      {
+        id: crypto.randomUUID(),
+        name,
+        greeting: 'Bapak/Ibu/Saudara/i',
+        phone: '',
+        group: 'Umum',
+        invitationQuota: 1,
+        slug: createGuestSlug(name, String(nextNumber)),
+        token: crypto.randomUUID(),
+        invitationStatus: 'belum_dikirim',
+        rsvpStatus: 'belum',
+      },
+    ];
+
+    update({ guests: nextGuests });
+    setQuery('');
+    setFilter('semua');
+    setPage(Math.max(1, Math.ceil(nextGuests.length / itemsPerPage)));
+    toast.success(`${name} ditambahkan. Lengkapi datanya lalu klik Simpan.`);
+
+    window.setTimeout(() => {
+      addLockRef.current = false;
+      setAddingGuest(false);
+    }, 500);
   }
+
+  function removeGuest(guest: GuestRecord) {
+    if (deletingGuestId) return;
+    setDeletingGuestId(guest.id);
+    update({
+      guests: content.guests.filter((item) => item.id !== guest.id),
+    });
+    toast.success(`${guest.name} dihapus. Klik Simpan untuk menyimpan perubahan.`);
+    window.setTimeout(() => setDeletingGuestId(null), 350);
+  }
+
   function exportExcel() {
-    const rows = content.guests.map((g) => ({
-      name: g.name,
-      greeting: g.greeting,
-      phone: g.phone,
-      group: g.group,
-      invitation_quota: g.invitationQuota,
-      invitation_status: g.invitationStatus,
-      rsvp_status: g.rsvpStatus,
-      notes: g.notes || '',
+    const rows = content.guests.map((guest) => ({
+      name: guest.name,
+      greeting: guest.greeting,
+      phone: guest.phone,
+      group: guest.group,
+      invitation_quota: guest.invitationQuota,
+      invitation_status: guest.invitationStatus,
+      rsvp_status: guest.rsvpStatus,
+      notes: guest.notes || '',
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(
@@ -1900,11 +1951,13 @@ function GuestsTab({
     );
     XLSX.writeFile(wb, `daftar-tamu-${content.slug}.xlsx`);
   }
+
   return (
     <Panel
       title="Daftar tamu"
+      description={`Menampilkan maksimal ${itemsPerPage} tamu per halaman agar tetap cepat, termasuk saat data mencapai 1.000 tamu.`}
       action={
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={exportExcel}
@@ -1915,9 +1968,10 @@ function GuestsTab({
           <button
             type="button"
             onClick={add}
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-3 py-2 text-sm font-bold text-white"
+            disabled={addingGuest}
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-3 py-2 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-50"
           >
-            <Plus size={16} /> Tambah
+            <Plus size={16} /> {addingGuest ? 'Menambahkan...' : 'Tambah'}
           </button>
         </div>
       }
@@ -1932,13 +1986,13 @@ function GuestsTab({
             className={`${inputClass} mt-0 pl-10`}
             placeholder="Cari nama, nomor, grup..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(event) => setQuery(event.target.value)}
           />
         </div>
         <select
           className={`${inputClass} mt-0`}
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          onChange={(event) => setFilter(event.target.value)}
         >
           <option value="semua">Semua RSVP</option>
           <option value="hadir">Hadir</option>
@@ -1947,206 +2001,304 @@ function GuestsTab({
           <option value="belum">Belum</option>
         </select>
       </div>
-      <div className="space-y-3">
-        {filtered.map((guest) => {
-          const index = content.guests.findIndex((x) => x.id === guest.id);
-          const linkPath =
-  `/invite/${content.slug}` +
-  `?to=${encodeURIComponent(guest.name)}` +
-  `&greeting=${encodeURIComponent(guest.greeting)}`;
-          const link = appOrigin ? `${appOrigin}${linkPath}` : linkPath;
-          const message = content.whatsappTemplate
-            .replace('[Nama Tamu]', guest.name)
-            .replace('[Link Undangan]', link);
-          return (
-            <div
-              key={guest.id}
-              className="rounded-2xl border border-slate-200 p-4"
-            >
-              <div className="grid gap-3 md:grid-cols-6">
-                <input
-                  className={inputClass}
-                  value={guest.name}
-                  onChange={(e) =>
-                    update({
-                      guests: content.guests.map((x, i) =>
-                        i === index
-                          ? {
-                              ...x,
-                              name: e.target.value,
-                              slug: createGuestSlug(
-                                e.target.value,
-                                String(index + 1),
-                              ),
-                            }
-                          : x,
-                      ),
-                    })
-                  }
-                />
-                <input
-                  className={inputClass}
-                  value={guest.greeting}
-                  onChange={(e) =>
-                    update({
-                      guests: content.guests.map((x, i) =>
-                        i === index ? { ...x, greeting: e.target.value } : x,
-                      ),
-                    })
-                  }
-                />
-                <input
-                  className={inputClass}
-                  value={guest.phone}
-                  onChange={(e) =>
-                    update({
-                      guests: content.guests.map((x, i) =>
-                        i === index
-                          ? {
-                              ...x,
-                              phone: normalizeIndonesianPhone(e.target.value),
-                            }
-                          : x,
-                      ),
-                    })
-                  }
-                />
-                <input
-                  className={inputClass}
-                  value={guest.group}
-                  onChange={(e) =>
-                    update({
-                      guests: content.guests.map((x, i) =>
-                        i === index ? { ...x, group: e.target.value } : x,
-                      ),
-                    })
-                  }
-                />
-                <input
-                  type="number"
-                  className={inputClass}
-                  value={guest.invitationQuota}
-                  onChange={(e) =>
-                    update({
-                      guests: content.guests.map((x, i) =>
-                        i === index
-                          ? { ...x, invitationQuota: Number(e.target.value) }
-                          : x,
-                      ),
-                    })
-                  }
-                />
-                <select
-                  className={inputClass}
-                  value={guest.rsvpStatus}
-                  onChange={(e) =>
-                    update({
-                      guests: content.guests.map((x, i) =>
-                        i === index
-                          ? {
-                              ...x,
-                              rsvpStatus: e.target
-                                .value as GuestRecord['rsvpStatus'],
-                            }
-                          : x,
-                      ),
-                    })
-                  }
-                >
-                  <option value="belum">Belum</option>
-                  <option value="hadir">Hadir</option>
-                  <option value="ragu">Ragu</option>
-                  <option value="tidak_hadir">Tidak hadir</option>
-                </select>
-              </div>
-              <div className="mt-3">
-  <textarea
-    className={inputClass}
-    rows={2}
-    value={guest.notes || ''}
-    placeholder="Catatan tamu"
-    onChange={(e) =>
-      update({
-        guests: content.guests.map((x, i) =>
-          i === index ? { ...x, notes: e.target.value } : x,
-        ),
-      })
-    }
-  />
-</div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    navigator.clipboard
-                      .writeText(link)
-                      .then(() => toast.success('Link disalin.'))
-                  }
-                  className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold"
-                >
-                  <Link2 size={14} /> Salin link
-                </button>
-                {guest.phone && (
-                  <>
-                    <a
-                      href={buildWhatsAppLink(guest.phone, message)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-900"
-                    >
-                      <MessageCircle size={14} /> WhatsApp
-                    </a>
-                    <a
-                      href={buildWhatsAppLink(guest.phone, message, true)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold"
-                    >
-                      WhatsApp Web
-                    </a>
-                  </>
-                )}
-                <button
-                  type="button"
-                  disabled={guest.invitationStatus === 'sudah_dikirim'}
-                  onClick={() => {
-                    update({
-                      guests: content.guests.map((x, i) =>
-                        i === index
-                          ? { ...x, invitationStatus: 'sudah_dikirim' }
-                          : x,
-                      ),
-                    });
-                    toast.success(
-                      `${guest.name} ditandai sudah dikirim. Klik Simpan.`,
-                    );
-                  }}
-                  className={`rounded-lg px-3 py-2 text-xs font-bold transition ${
-                    guest.invitationStatus === 'sudah_dikirim'
-                      ? 'cursor-default bg-emerald-100 text-emerald-800'
-                      : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
-                  }`}
-                >
-                  {guest.invitationStatus === 'sudah_dikirim'
-                    ? 'Sudah dikirim'
-                    : 'Tandai dikirim'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    update({
-                      guests: content.guests.filter((x) => x.id !== guest.id),
-                    })
-                  }
-                  className="ml-auto text-red-600"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
-            </div>
-          );
-        })}
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+        <span>
+          Menampilkan <strong>{firstItem}</strong>–<strong>{lastItem}</strong>{' '}
+          dari <strong>{filtered.length}</strong> tamu
+        </span>
+        <span>
+          Total seluruh data: <strong>{content.guests.length}</strong>
+        </span>
       </div>
+
+      <div className="space-y-3">
+        {paginatedGuests.length ? (
+          paginatedGuests.map((guest) => {
+            const index = content.guests.findIndex(
+              (item) => item.id === guest.id,
+            );
+            const linkPath =
+              `/invite/${content.slug}` +
+              `?to=${encodeURIComponent(guest.name)}` +
+              `&greeting=${encodeURIComponent(guest.greeting)}`;
+            const link = appOrigin ? `${appOrigin}${linkPath}` : linkPath;
+            const message = content.whatsappTemplate
+              .replace('[Nama Tamu]', guest.name)
+              .replace('[Link Undangan]', link);
+
+            return (
+              <div
+                key={guest.id}
+                className="rounded-2xl border border-slate-200 p-4"
+              >
+                <div className="grid gap-3 md:grid-cols-6">
+                  <input
+                    className={inputClass}
+                    value={guest.name}
+                    aria-label="Nama tamu"
+                    onChange={(event) =>
+                      update({
+                        guests: content.guests.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? {
+                                ...item,
+                                name: event.target.value,
+                                slug: createGuestSlug(
+                                  event.target.value,
+                                  String(index + 1),
+                                ),
+                              }
+                            : item,
+                        ),
+                      })
+                    }
+                  />
+                  <input
+                    className={inputClass}
+                    value={guest.greeting}
+                    aria-label="Sapaan tamu"
+                    onChange={(event) =>
+                      update({
+                        guests: content.guests.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, greeting: event.target.value }
+                            : item,
+                        ),
+                      })
+                    }
+                  />
+                  <input
+                    className={inputClass}
+                    value={guest.phone}
+                    aria-label="Nomor WhatsApp tamu"
+                    onChange={(event) =>
+                      update({
+                        guests: content.guests.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? {
+                                ...item,
+                                phone: normalizeIndonesianPhone(
+                                  event.target.value,
+                                ),
+                              }
+                            : item,
+                        ),
+                      })
+                    }
+                  />
+                  <input
+                    className={inputClass}
+                    value={guest.group}
+                    aria-label="Grup tamu"
+                    onChange={(event) =>
+                      update({
+                        guests: content.guests.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, group: event.target.value }
+                            : item,
+                        ),
+                      })
+                    }
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    className={inputClass}
+                    value={guest.invitationQuota}
+                    aria-label="Kuota undangan"
+                    onChange={(event) =>
+                      update({
+                        guests: content.guests.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? {
+                                ...item,
+                                invitationQuota: Math.max(
+                                  1,
+                                  Number(event.target.value) || 1,
+                                ),
+                              }
+                            : item,
+                        ),
+                      })
+                    }
+                  />
+                  <select
+                    className={inputClass}
+                    value={guest.rsvpStatus}
+                    aria-label="Status RSVP"
+                    onChange={(event) =>
+                      update({
+                        guests: content.guests.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? {
+                                ...item,
+                                rsvpStatus: event.target
+                                  .value as GuestRecord['rsvpStatus'],
+                              }
+                            : item,
+                        ),
+                      })
+                    }
+                  >
+                    <option value="belum">Belum</option>
+                    <option value="hadir">Hadir</option>
+                    <option value="ragu">Ragu</option>
+                    <option value="tidak_hadir">Tidak hadir</option>
+                  </select>
+                </div>
+
+                <div className="mt-3">
+                  <textarea
+                    className={inputClass}
+                    rows={2}
+                    value={guest.notes || ''}
+                    placeholder="Catatan tamu"
+                    aria-label="Catatan tamu"
+                    onChange={(event) =>
+                      update({
+                        guests: content.guests.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, notes: event.target.value }
+                            : item,
+                        ),
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigator.clipboard
+                        .writeText(link)
+                        .then(() => toast.success('Link disalin.'))
+                    }
+                    className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold"
+                  >
+                    <Link2 size={14} /> Salin link
+                  </button>
+                  {guest.phone && (
+                    <>
+                      <a
+                        href={buildWhatsAppLink(guest.phone, message)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-900"
+                      >
+                        <MessageCircle size={14} /> WhatsApp
+                      </a>
+                      <a
+                        href={buildWhatsAppLink(guest.phone, message, true)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold"
+                      >
+                        WhatsApp Web
+                      </a>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    disabled={guest.invitationStatus === 'sudah_dikirim'}
+                    onClick={() => {
+                      update({
+                        guests: content.guests.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, invitationStatus: 'sudah_dikirim' }
+                            : item,
+                        ),
+                      });
+                      toast.success(
+                        `${guest.name} ditandai sudah dikirim. Klik Simpan.`,
+                      );
+                    }}
+                    className={`rounded-lg px-3 py-2 text-xs font-bold transition ${
+                      guest.invitationStatus === 'sudah_dikirim'
+                        ? 'cursor-default bg-emerald-100 text-emerald-800'
+                        : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+                    }`}
+                  >
+                    {guest.invitationStatus === 'sudah_dikirim'
+                      ? 'Sudah dikirim'
+                      : 'Tandai dikirim'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deletingGuestId === guest.id}
+                    onClick={() => removeGuest(guest)}
+                    className="ml-auto inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-50"
+                    aria-label={`Hapus ${guest.name}`}
+                  >
+                    <Trash2 size={16} />
+                    {deletingGuestId === guest.id ? 'Menghapus...' : 'Hapus'}
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <Empty text="Tidak ada tamu yang cocok dengan pencarian atau filter." />
+        )}
+      </div>
+
+      {filtered.length > itemsPerPage && (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-5">
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((value) => Math.max(1, value - 1))}
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Sebelumnya
+          </button>
+
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {Array.from({ length: totalPages }, (_, index) => index + 1)
+              .filter(
+                (pageNumber) =>
+                  pageNumber === 1 ||
+                  pageNumber === totalPages ||
+                  Math.abs(pageNumber - page) <= 1,
+              )
+              .map((pageNumber, index, visiblePages) => {
+                const previous = visiblePages[index - 1];
+                return (
+                  <span key={pageNumber} className="flex items-center gap-2">
+                    {previous && pageNumber - previous > 1 && (
+                      <span className="text-slate-400">…</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setPage(pageNumber)}
+                      aria-current={page === pageNumber ? 'page' : undefined}
+                      className={`grid size-10 place-items-center rounded-lg text-sm font-bold ${
+                        page === pageNumber
+                          ? 'bg-slate-950 text-white'
+                          : 'border border-slate-300 bg-white text-slate-700'
+                      }`}
+                    >
+                      {pageNumber}
+                    </button>
+                  </span>
+                );
+              })}
+          </div>
+
+          <button
+            type="button"
+            disabled={page >= totalPages}
+            onClick={() =>
+              setPage((value) => Math.min(totalPages, value + 1))
+            }
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Berikutnya
+          </button>
+        </div>
+      )}
     </Panel>
   );
 }
