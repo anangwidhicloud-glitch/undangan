@@ -60,16 +60,16 @@ export async function getWeddingContent(
     .order('created_at', { ascending: false })
     .limit(500),
 
-  supabase
-    .from('guest_messages')
-    .select(
-      'id, guest_name, message, attendance_status, is_approved, created_at',
-    )
-    .eq('wedding_id', wedding.id)
-    .order('created_at', { ascending: false })
-    .limit(500),
+supabase
+  .from('guest_messages')
+  .select(
+    'id, guest_name, message, attendance_status, is_approved, created_at',
+  )
+  .eq('wedding_id', wedding.id)
+  .eq('is_approved', true)
+  .order('created_at', { ascending: false })
+  .limit(500),
 ]);
-
     const freshRsvps = mapRsvps(
       (rsvpsResult.data ?? []) as Record<string, unknown>[],
     );
