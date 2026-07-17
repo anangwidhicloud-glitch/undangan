@@ -42,34 +42,55 @@ export async function getWeddingContent(
         source: 'fallback',
       };
 
-    const [snapshotResult, rsvpsResult] = await Promise.all([
-      supabase
-        .from('site_settings')
-        .select('setting_value')
-        .eq('wedding_id', wedding.id)
-        .eq('setting_key', 'content_snapshot')
-        .maybeSingle(),
-      supabase
-        .from('rsvps')
-        .select(
-          'id, guest_id, guest_name, attendance_status, guest_count, phone, message, created_at, updated_at',
-        )
-        .eq('wedding_id', wedding.id)
-        .order('created_at', { ascending: false })
-        .limit(500),
-    ]);
+    const [snapshotResult, rsvpsResult, freshMessagesResult] =
+  await Promise.all([
+  supabase
+    .from('site_settings')
+    .select('setting_value')
+    .eq('wedding_id', wedding.id)
+    .eq('setting_key', 'content_snapshot')
+    .maybeSingle(),
+
+  supabase
+    .from('rsvps')
+    .select(
+      'id, guest_id, guest_name, attendance_status, guest_count, phone, message, created_at, updated_at',
+    )
+    .eq('wedding_id', wedding.id)
+    .order('created_at', { ascending: false })
+    .limit(500),
+
+  supabase
+    .from('guest_messages')
+    .select(
+      'id, guest_name, message, attendance_status, is_approved, created_at',
+    )
+    .eq('wedding_id', wedding.id)
+    .order('created_at', { ascending: false })
+    .limit(500),
+]);
 
     const freshRsvps = mapRsvps(
       (rsvpsResult.data ?? []) as Record<string, unknown>[],
     );
 
+    const freshMessages = (freshMessagesResult.data ?? []).map((item) => ({
+  id: item.id,
+  guestName: item.guest_name,
+  message: item.message,
+  attendanceStatus: item.attendance_status,
+  approved: item.is_approved,
+  createdAt: item.created_at,
+}));
+
     const snapshot = snapshotResult.data?.setting_value;
     if (snapshot && typeof snapshot === 'object') {
       return {
-        content: resolveWeddingContent({
-          ...(snapshot as Partial<WeddingContent>),
-          rsvps: freshRsvps,
-        }),
+content: resolveWeddingContent({
+  ...(snapshot as Partial<WeddingContent>),
+  rsvps: freshRsvps,
+  messages: freshMessages,
+}),
         source: 'supabase',
       };
     }
